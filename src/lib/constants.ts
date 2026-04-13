@@ -27,4 +27,13 @@ export interface Settings {
   admin_pin: string;
   signups_open: boolean;
   announcement: string | null;
+  signup_hours_before: number | null;
+  club_night_time: string | null; // "HH:MM" format
 }
+
+export const DAY_TO_NUMBER: Record<string, number> = {
+  Monday: 1,
+  Tuesday: 2,
+  Thursday: 4,
+  Friday: 5,
+};

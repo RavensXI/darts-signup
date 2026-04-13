@@ -10,6 +10,7 @@ import {
   type Settings,
   type DayName,
 } from "@/lib/constants";
+import { areSignupsOpen, getNextOpenTime } from "@/lib/schedule";
 
 type NightCounts = Record<string, { confirmed: number; reserve: number }>;
 
@@ -29,6 +30,7 @@ export default function HomePage() {
   } | null>(null);
   const [loading, setLoading] = useState(false);
   const [initialLoad, setInitialLoad] = useState(true);
+  const [, setTick] = useState(0);
 
   const fetchData = useCallback(async () => {
     const [{ data: settingsData }, { data: signupsData }] = await Promise.all([
@@ -70,6 +72,16 @@ export default function HomePage() {
       getSupabase().removeChannel(settingsChannel);
     };
   }, [fetchData]);
+
+  // Re-evaluate schedule every 30 seconds so the page updates when a window opens/closes
+  useEffect(() => {
+    if (!settings?.signup_hours_before) return;
+    const interval = setInterval(() => setTick((t) => t + 1), 30000);
+    return () => clearInterval(interval);
+  }, [settings?.signup_hours_before]);
+
+  const signupsCurrentlyOpen = settings ? areSignupsOpen(settings) : false;
+  const nextOpen = settings ? getNextOpenTime(settings) : null;
 
   const counts: NightCounts = {};
   for (const night of CLUB_NIGHTS) {
@@ -247,16 +259,34 @@ export default function HomePage() {
         )}
 
         {/* Signups closed */}
-        {settings && !settings.signups_open ? (
+        {settings && !signupsCurrentlyOpen ? (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 text-center">
             <div className="text-5xl mb-4">🎯</div>
             <h2 className="text-xl font-bold text-dart-green-dark mb-2">
               Signups aren&apos;t open yet
             </h2>
-            <p className="text-gray-500">
-              Check back soon — your PE teacher will open signups when
-              it&apos;s time.
-            </p>
+            {nextOpen ? (
+              <p className="text-gray-500">
+                Signups open{" "}
+                <span className="font-semibold text-dart-green-dark">
+                  {nextOpen.toLocaleDateString("en-GB", {
+                    weekday: "long",
+                    day: "numeric",
+                    month: "long",
+                  })}{" "}
+                  at{" "}
+                  {nextOpen.toLocaleTimeString("en-GB", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
+              </p>
+            ) : (
+              <p className="text-gray-500">
+                Check back soon — your PE teacher will open signups when
+                it&apos;s time.
+              </p>
+            )}
           </div>
         ) : (
           <>

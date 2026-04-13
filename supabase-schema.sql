@@ -20,13 +20,19 @@ create table if not exists settings (
   id int primary key default 1 check (id = 1),
   admin_pin text not null default '1234',
   signups_open boolean not null default true,
-  announcement text
+  announcement text,
+  signup_hours_before integer default null,
+  club_night_time time default '15:30'
 );
 
 -- Seed default settings row
 insert into settings (id, admin_pin, signups_open, announcement)
 values (1, '1234', true, null)
 on conflict (id) do nothing;
+
+-- Migration for existing installs: add scheduling columns
+alter table settings add column if not exists signup_hours_before integer default null;
+alter table settings add column if not exists club_night_time time default '15:30';
 
 -- 3. Enable Row Level Security
 alter table signups enable row level security;

@@ -10,6 +10,7 @@ import {
   type Settings,
   type DayName,
 } from "@/lib/constants";
+import { areSignupsOpen, getSchedulePreview } from "@/lib/schedule";
 
 export default function AdminPage() {
   const [authenticated, setAuthenticated] = useState(false);
@@ -27,6 +28,8 @@ export default function AdminPage() {
   const [newPin, setNewPin] = useState("");
   const [showPinChange, setShowPinChange] = useState(false);
   const [toast, setToast] = useState("");
+  const [hoursBefore, setHoursBefore] = useState<number>(72);
+  const [clubNightTime, setClubNightTime] = useState("15:30");
 
   const fetchData = useCallback(async () => {
     const [{ data: settingsData }, { data: signupsData }] = await Promise.all([
@@ -36,6 +39,12 @@ export default function AdminPage() {
     if (settingsData) {
       setSettings(settingsData);
       setAnnouncementDraft(settingsData.announcement || "");
+      if (settingsData.signup_hours_before != null) {
+        setHoursBefore(settingsData.signup_hours_before);
+      }
+      if (settingsData.club_night_time) {
+        setClubNightTime(settingsData.club_night_time);
+      }
     }
     if (signupsData) setSignups(signupsData);
   }, []);
@@ -172,6 +181,31 @@ export default function AdminPage() {
     showToast("PIN changed");
   }
 
+  async function saveSchedule() {
+    await getSupabase()
+      .from("settings")
+      .update({
+        signup_hours_before: hoursBefore,
+        club_night_time: clubNightTime,
+        signups_open: true,
+      })
+      .eq("id", 1);
+    await fetchData();
+    showToast("Schedule saved");
+  }
+
+  async function clearSchedule() {
+    await getSupabase()
+      .from("settings")
+      .update({ signup_hours_before: null })
+      .eq("id", 1);
+    await fetchData();
+    showToast("Schedule removed — using manual toggle");
+  }
+
+  const schedulingActive = settings?.signup_hours_before != null;
+  const computedOpen = settings ? areSignupsOpen(settings) : false;
+
   const currentSignups = nightSignups(activeTab);
   const nightInfo = CLUB_NIGHTS.find((n) => n.day === activeTab)!;
   const confirmedCount = currentSignups.filter(
@@ -293,12 +327,25 @@ export default function AdminPage() {
             <button
               onClick={toggleSignups}
               className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
-                settings?.signups_open
+                schedulingActive
+                  ? computedOpen
+                    ? "bg-blue-500/20 text-blue-200 hover:bg-blue-500/30"
+                    : !settings?.signups_open
+                    ? "bg-red-500/20 text-red-200 hover:bg-red-500/30"
+                    : "bg-blue-500/20 text-blue-200 hover:bg-blue-500/30"
+                  : settings?.signups_open
                   ? "bg-green-500/20 text-green-200 hover:bg-green-500/30"
                   : "bg-red-500/20 text-red-200 hover:bg-red-500/30"
               }`}
+              title={schedulingActive ? "Click to manually override" : "Toggle signups open/closed"}
             >
-              Signups {settings?.signups_open ? "OPEN" : "CLOSED"}
+              {schedulingActive
+                ? !settings?.signups_open
+                  ? "OVERRIDE: CLOSED"
+                  : computedOpen
+                  ? "AUTO: OPEN"
+                  : "AUTO: CLOSED"
+                : `Signups ${settings?.signups_open ? "OPEN" : "CLOSED"}`}
             </button>
             <a
               href="/"
@@ -483,6 +530,167 @@ export default function AdminPage() {
             >
               Save Announcement
             </button>
+          </div>
+
+          {/* Scheduling */}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 space-y-3">
+            <h3 className="font-bold text-dart-green-dark text-sm">
+              Automatic Scheduling
+            </h3>
+            {schedulingActive ? (
+              <>
+                <p className="text-sm text-gray-500">
+                  Signups automatically open{" "}
+                  <span className="font-semibold text-dart-green-dark">
+                    {settings?.signup_hours_before} hours
+                  </span>{" "}
+                  before each club night.
+                  {!settings?.signups_open && (
+                    <span className="text-dart-red font-medium">
+                      {" "}(Currently overridden to closed — toggle open to resume schedule.)
+                    </span>
+                  )}
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">
+                      Hours before club night
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={168}
+                      value={hoursBefore}
+                      onChange={(e) => setHoursBefore(Number(e.target.value))}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:border-dart-green focus:outline-none focus:ring-2 focus:ring-dart-green/20"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">
+                      Club night start time
+                    </label>
+                    <input
+                      type="time"
+                      value={clubNightTime}
+                      onChange={(e) => setClubNightTime(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:border-dart-green focus:outline-none focus:ring-2 focus:ring-dart-green/20"
+                    />
+                  </div>
+                </div>
+                {/* Schedule preview */}
+                <div className="bg-gray-50 rounded-xl p-3 space-y-1">
+                  <p className="text-xs font-medium text-gray-500 mb-2">
+                    Next signup windows:
+                  </p>
+                  {getSchedulePreview(hoursBefore, clubNightTime).map(
+                    (preview) => (
+                      <div
+                        key={preview.day}
+                        className="flex justify-between text-xs text-gray-600"
+                      >
+                        <span className="font-medium">
+                          {preview.day} ({preview.yearGroup})
+                        </span>
+                        <span>
+                          Opens{" "}
+                          {preview.opensAt.toLocaleDateString("en-GB", {
+                            weekday: "short",
+                            day: "numeric",
+                            month: "short",
+                          })}{" "}
+                          {preview.opensAt.toLocaleTimeString("en-GB", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
+                      </div>
+                    )
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={saveSchedule}
+                    className="px-4 py-2 bg-dart-green text-white text-sm font-medium rounded-xl hover:bg-dart-green-light transition-colors"
+                  >
+                    Save Changes
+                  </button>
+                  <button
+                    onClick={clearSchedule}
+                    className="px-4 py-2 border-2 border-gray-200 text-gray-600 text-sm font-medium rounded-xl hover:bg-gray-50 transition-colors"
+                  >
+                    Remove Schedule
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-gray-500">
+                  Set signups to automatically open a set number of hours before
+                  each club night. No need to manually toggle each week.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">
+                      Hours before club night
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={168}
+                      value={hoursBefore}
+                      onChange={(e) => setHoursBefore(Number(e.target.value))}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:border-dart-green focus:outline-none focus:ring-2 focus:ring-dart-green/20"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">
+                      Club night start time
+                    </label>
+                    <input
+                      type="time"
+                      value={clubNightTime}
+                      onChange={(e) => setClubNightTime(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:border-dart-green focus:outline-none focus:ring-2 focus:ring-dart-green/20"
+                    />
+                  </div>
+                </div>
+                {/* Schedule preview */}
+                <div className="bg-gray-50 rounded-xl p-3 space-y-1">
+                  <p className="text-xs font-medium text-gray-500 mb-2">
+                    Preview — signups would open:
+                  </p>
+                  {getSchedulePreview(hoursBefore, clubNightTime).map(
+                    (preview) => (
+                      <div
+                        key={preview.day}
+                        className="flex justify-between text-xs text-gray-600"
+                      >
+                        <span className="font-medium">
+                          {preview.day} ({preview.yearGroup})
+                        </span>
+                        <span>
+                          {preview.opensAt.toLocaleDateString("en-GB", {
+                            weekday: "short",
+                            day: "numeric",
+                            month: "short",
+                          })}{" "}
+                          {preview.opensAt.toLocaleTimeString("en-GB", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
+                      </div>
+                    )
+                  )}
+                </div>
+                <button
+                  onClick={saveSchedule}
+                  className="px-4 py-2 bg-dart-green text-white text-sm font-medium rounded-xl hover:bg-dart-green-light transition-colors"
+                >
+                  Enable Schedule
+                </button>
+              </>
+            )}
           </div>
 
           {/* Danger zone */}
